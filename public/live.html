@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Messages Live</title>
+    <style>
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages > li {
+            padding: 0.5rem 1rem;
+        }
+
+        #messages > li:nth-child(odd) {
+            background: #efefef;
+        }
+
+        #header-id {
+            display: flex;
+            gap: 20px;
+            margin: 0;
+            padding: 0.5rem 1rem;
+            position: sticky;
+            top: 0;
+            background: #ccc;
+        }
+    </style>
+</head>
+<body>
+<div id="header-id">
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    <input id="session-id" placeholder="Session" />
+    <input id="conversation-id" placeholder="Conversation" />
+    <button onclick="listen()">Listen</button>
+    <button onclick="stop()">Stop</button>
+</div>
+<ul id="messages"></ul>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+    const messagesElement = document.getElementById("messages");
+    let item;
+    const createMessageElements = (messageIds) => {
+        for (const messageId of messageIds) {
+            item = document.createElement("li");
+            item.setAttribute("id", `message_${messageId}`);
+            item.innerHTML = `Message #${messageId}`;
+            messagesElement.appendChild(item);
+        }
+        window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    const NEW_MESSAGES = "NEW_MESSAGES";
+    const LISTEN_CONVERSATION = "LISTEN_CONVERSATION";
+    const STOP_LISTENING_CONVERSATION = "STOP_LISTENING_CONVERSATION";
+    const ERROR = "ERROR";
+
+    let socket;
+
+    function connect() {
+        socket = io({
+            auth: {
+                services: ["live"],
+            }
+        });
+        socket.onAny((eventName, payload) => {
+            console.log("event name:",eventName,"payload:", payload);
+        });
+        socket.on(ERROR, ({ message }) => {
+            alert(message);
+        });
+    }
+
+    function disconnect() {
+        socket.disconnect();
+    }
+
+    function listen() {
+        const conversationId = document.getElementById("conversation-id").value;
+        const session = document.getElementById("session-id").value;
+
+        socket?.on(NEW_MESSAGES, createMessageElements);
+        socket?.emit(LISTEN_CONVERSATION, { conversationId, session: session });
+    }
+
+    function stop() {
+        const conversationId = document.getElementById("conversation-id").value;
+        socket?.off(NEW_MESSAGES, createMessageElements);
+        socket?.emit(STOP_LISTENING_CONVERSATION, conversationId);
+    }
+</script>
+
+</body>
+</html>

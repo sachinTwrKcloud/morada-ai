@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Mia chat</title>
+    <style>
+        body {
+            margin: 0;
+            padding-bottom: 3rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #form {
+            background: rgba(0, 0, 0, 0.15);
+            padding: 0.25rem;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            height: 3rem;
+            box-sizing: border-box;
+            backdrop-filter: blur(10px);
+        }
+
+        #input {
+            border: none;
+            padding: 0 1rem;
+            flex-grow: 1;
+            border-radius: 2rem;
+            margin: 0.25rem;
+        }
+
+        #input:focus {
+            outline: none;
+        }
+
+        #form > button {
+            background: #333;
+            border: none;
+            padding: 0 1rem;
+            margin: 0.25rem;
+            border-radius: 3px;
+            outline: none;
+            color: #fff;
+        }
+
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages > li {
+            padding: 0.5rem 1rem;
+        }
+
+        #messages > li:nth-child(odd) {
+            background: #efefef;
+        }
+        
+        #header-id {
+            display: flex;
+            margin: 0;
+            padding: 0.5rem 1rem;
+            position: sticky;
+            top: 0;
+            background: #ccc;
+        }
+
+        #instance-name-id {
+            flex: 0 1 50%;
+        }
+    </style>
+</head>
+<body>
+    <div id="header-id">
+        <div id="instance-name-id">&nbsp;</div>
+        <div id="user-name-id"></div>
+    </div>
+    <ul id="messages"></ul>
+    <form id="form" action="">
+        <input id="input" autocomplete="off"/>
+        <button>Send</button>
+    </form>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    const instance = {
+        token: urlParams.get('token') || "MiaStagingClientChatToken", 
+        chatId: urlParams.get('id') || "UniqueChatId",
+    };
+    
+    const roomId = urlParams.get('room') || localStorage.getItem("chat.roomId");
+
+    const socket = io({
+        auth: {
+            instance,
+            roomId,
+        }
+    });
+
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const messagesElement = document.getElementById('messages');
+    let item;
+    const createMessageElement = ({ id, content, from, createdAt, status }) => {
+        item = document.createElement('li');
+        item.setAttribute("id", `message_${id}`);
+        item.innerHTML = `
+            ${createdAt} - ${content}
+            <br />
+            ${from || ""}
+        `;
+        if (status) {
+            const statusElement = document.createElement('span');
+            statusElement.setAttribute("id", `message_${id}_status`);
+            statusElement.innerText = `(${status})`;
+            item.appendChild(statusElement);
+        }
+        messagesElement.appendChild(item);
+    }
+    
+    const EVENT_SERVER_SEND_MESSAGE = "EVENT_SERVER_SEND_MESSAGE";
+    const EVENT_SERVER_INIT_MESSAGE_LIST = "EVENT_SERVER_INIT_MESSAGE_LIST";
+    const EVENT_CLIENT_SEND_MESSAGE = "EVENT_CLIENT_SEND_MESSAGE";
+    const EVENT_SERVER_SEND_USER_DATA = "EVENT_SERVER_SEND_USER_DATA";
+    const EVENT_SERVER_SEND_MESSAGE_STATUS = "EVENT_SERVER_SEND_MESSAGE_STATUS";
+    const EVENT_SERVER_SEND_CHAT_STATE = "EVENT_SERVER_SEND_CHAT_STATE";
+    const EVENT_INIT_ROOM = "EVENT_INIT_ROOM";
+    const EVENT_ERROR = "EVENT_ERROR";
+    
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (input.value) {
+            socket.emit(EVENT_CLIENT_SEND_MESSAGE, { content: input.value });
+            input.value = '';
+        }
+    });
+    
+    socket.on(EVENT_INIT_ROOM, ({roomId, instance}) => {
+        console.log("event room:",EVENT_INIT_ROOM,"room id:", roomId);
+        
+        document.getElementById('instance-name-id').innerText = instance.name;
+
+        if (!urlParams.get('room')) {
+            localStorage.setItem("chat.roomId", roomId);
+        }
+    });
+
+    socket.on(EVENT_SERVER_INIT_MESSAGE_LIST, (messages) => {
+        messagesElement.innerHTML = "";
+        messages.forEach(createMessageElement);
+        if (item) {
+            window.scrollTo(0, document.body.scrollHeight);
+        }
+    });
+
+    socket.on(EVENT_SERVER_SEND_MESSAGE, (message) => {
+        createMessageElement(message);
+        window.scrollTo(0, document.body.scrollHeight);
+    });
+    
+    socket.on(EVENT_SERVER_SEND_USER_DATA, ({ name }) => {
+        document.getElementById('user-name-id').innerText = name;
+    });
+    
+    socket.on(EVENT_SERVER_SEND_MESSAGE_STATUS, ({ messageId, status }) => {
+        const statusEl = document.getElementById(`message_${messageId}_status`);
+        if (statusEl) statusEl.innerText = `(${status})`;
+    });
+
+    socket.on(EVENT_SERVER_SEND_CHAT_STATE, ({ from, state }) => {
+        if (state === "composing") {
+            const stateElement = document.createElement('li');
+            stateElement.innerText = `${from} typing...`;
+            messagesElement.appendChild(stateElement);
+            setTimeout(() => {
+                stateElement.remove();
+            }, 2000);
+        }
+    });
+        
+    socket.on(EVENT_ERROR, ({message}) => {
+        alert(message);
+        console.error(message);
+    });
+</script>
+
+</body>
+</html>
