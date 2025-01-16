@@ -1,9 +1,8 @@
 import axios from "axios";
 import { v4 } from "uuid";
-import { Server, Socket } from "socket.io";
-import { FastifyBaseLogger, FastifyInstance } from "fastify";
+import { Socket } from "socket.io";
 
-import { CHAT_CHANNEL_DOMAIN, ChatServiceName, EVENTS } from "./constants";
+import { ChatServiceName, CHAT_CHANNEL_DOMAIN,  EVENTS } from "../constants";
 import {
     ChatStateDTO,
     ClientMessageDto,
@@ -20,55 +19,12 @@ import { getRoomMessages, MessageDbRow } from "../../db/messages";
 import { getInstanceByChatId, getInstanceById, InstanceDbRow } from "../../db/bots";
 import { getRoomPerson } from "../../db/people";
 import { mapMessageDTO } from "../../utils";
+import { ServiceBase } from "../service-base";
 
-export class ChatService {
-    server: FastifyInstance;
-
-    log: FastifyBaseLogger;
-
-    private _io?: Server;
-
-    get io (): Server {
-        if (!this._io) {
-            throw Error("[ChatService] Socket IO is not defined");
-        }
-        return this._io;
-    }
-
-    set io (value: Server) {
-        this._io = value;
-    }
-
-    constructor ({ server }: { server: FastifyInstance }) {
-        this.server = server;
-        this.log = server.log;
-    }
-
-    connect () {
-        const connectedServer = this.server as FastifyInstance & {
-            io: Server;
-        };
-        if (!connectedServer.io) {
-            throw Error("[ChatService] Cannot connect Socket IO");
-        }
-        this._io = connectedServer.io;
-
-        this.io.on("connection", this.initSocket.bind(this));
-    }
+export class ChatService extends ServiceBase {
+    name = ChatServiceName;
 
     async initSocket (socket: Socket) {
-        // ChatService is default service for websocket-api, skip init if other services requested
-        const services = socket.handshake.auth.services;
-        if (services?.length && !services.includes(ChatServiceName)) {
-            return;
-        }
-
-        this.log.info(`[Chat service] Socket #${socket.id} ${socket.recovered ? "re-" : ""}connected`);
-
-        socket.on("disconnect", () => {
-            this.log.info(`[ChatService] Socket #${socket.id} disconnected`);
-        });
-
         const isInstanceValid = await this.initInstance(socket);
         if (!isInstanceValid) return;
 
@@ -82,15 +38,15 @@ export class ChatService {
         socket.data.instance = await getInstanceByChatId(socket.handshake.auth.instance?.chatId || "");
 
         if (!socket.data.instance) {
-            this.closeSocket(socket, "[ChatService] Chat Instance Error!");
+            this.closeSocket(socket, "[Chat Service] Chat Instance Error!");
             return;
         }
         if (!socket.data.instance.props.chat?.enabled) {
-            this.closeSocket(socket, "[ChatService] Instance Chat Access Denied!");
+            this.closeSocket(socket, "[Chat Service] Instance Chat Access Denied!");
             return false;
         }
         if (socket.handshake.auth.instance?.token !== socket.data.instance.props.chat?.clientToken) {
-            this.closeSocket(socket, "[ChatService] Instance Access Denied!");
+            this.closeSocket(socket, "[Chat Service] Instance Access Denied!");
             return false;
         }
         return true;
@@ -98,7 +54,7 @@ export class ChatService {
 
     async initRoom (socket: Socket) {
         const roomId = socket.handshake.auth.roomId || v4();
-        this.log.info(`Init room ${roomId}`);
+        this.log.info(`Init room ${roomId}`, socket.id);
 
         socket.data.roomId = roomId;
         socket.join(roomId);
@@ -123,7 +79,7 @@ export class ChatService {
     async initConversation (socket: Socket) {
         if (!socket.recovered) {
             const messages = await getRoomMessages(socket.data.roomId, socket.data.instance.id);
-            this.log.info(`[ChatService] Sending initial messages: ${messages.length}`);
+            this.log.info(`Sending initial messages: ${messages.length}`, socket.id);
 
             socket.emit(EVENTS.EVENT_SERVER_INIT_MESSAGE_LIST, messages.map(mapMessageDTO));
         }
@@ -142,7 +98,7 @@ export class ChatService {
                 direction: "outgoing",
                 type: MessageType.Text,
             };
-            this.log.info(`[ChatService] Processing message ${message.id} from room ${socket.data.roomId}`);
+            this.log.info(`Processing message ${message.id} from room ${socket.data.roomId}`, socket.id);
 
             this.sendMessageToClient(socket.data.roomId, message);
 
@@ -165,7 +121,7 @@ export class ChatService {
                 await axios.post(`${process.env.MIA_GATEWAY_BASE_URL}/receiveMessage`, messageDbRow);
                 isFirstMessage = false;
             } catch (e) {
-                this.log.error(`[ChatService] Send message to Mia error ${e}`);
+                this.log.error(`Send message to Mia error ${e}`, socket.id);
                 console.error(e);
 
                 this.sendMessageStatusToClient(socket.data.roomId, {
@@ -177,7 +133,7 @@ export class ChatService {
     }
 
     sendPersonDataToClient (socket: Socket) {
-        this.log.info(`[ChatService] Sending person data to room ${socket.data.roomId}`);
+        this.log.info(`Sending person data to room ${socket.data.roomId}`, socket.id);
 
         const { name, email, phoneNumber } = socket.data.person || {};
         this.io.to(socket.data.roomId).emit(EVENTS.EVENT_SERVER_SEND_USER_DATA, {
@@ -190,18 +146,20 @@ export class ChatService {
     async getInstanceForSystemMessage (instanceId: number, systemToken: string) {
         const instance = await getInstanceById(instanceId);
         if (!instance) {
-            throw Error("[ChatService] Instance Error!");
+            throw Error("[Chat Service] Instance Error!");
         }
         if (!instance.props.chat?.enabled) {
-            throw Error("[ChatService] Instance Chat Access Denied!");
+            throw Error("[Chat Service] Instance Chat Access Denied!");
         }
         if (systemToken !== instance.props.chat?.systemToken) {
-            throw Error("[ChatService] Instance Access Denied!");
+            throw Error("[Chat Service] Instance Access Denied!");
         }
         return instance;
     }
 
     sendSystemMessage (instance: InstanceDbRow, { id, to, type, content }: MiaMessageDto) {
+        this.log.info("Received system message");
+
         const roomId = to.split("@")[0];
         switch (type) {
             case MessageType.Text: {
@@ -236,13 +194,12 @@ export class ChatService {
                 break;
             }
             default: {
-                throw Error("[ChatService] Unsupported message type!");
+                throw Error("[Chat Service] Unsupported message type!");
             }
         }
     }
 
     sendMessageToClient (roomId: string, message: ServerMessageDto) {
-        this.log.info(`[ChatService] Sending message ${message.id} to client ${roomId}`);
         this.io.to(roomId).emit(EVENTS.EVENT_SERVER_SEND_MESSAGE, message);
     }
 
@@ -252,10 +209,5 @@ export class ChatService {
 
     sendMessageStatusToClient (roomId: string, status: StatusDTO) {
         this.io.to(roomId).emit(EVENTS.EVENT_SERVER_SEND_MESSAGE_STATUS, status);
-    }
-
-    closeSocket (socket: Socket, message?: string) {
-        if (message) socket.emit(EVENTS.EVENT_ERROR, { message });
-        socket.disconnect(true);
     }
 }

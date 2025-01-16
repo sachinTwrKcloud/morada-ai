@@ -1,5 +1,5 @@
 import sql from "./db";
-import { CHAT_CHANNEL_DOMAIN } from "../services/chat/constants";
+import { CHAT_CHANNEL_DOMAIN } from "../services/constants";
 import { MessageActors, MessageStatus, MessageType } from "../types";
 
 export type MessageMetadata = {

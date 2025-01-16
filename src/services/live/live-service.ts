@@ -1,67 +1,30 @@
-import { FastifyBaseLogger, FastifyInstance } from "fastify";
-import { Server, Socket } from "socket.io";
+import { FastifyInstance } from "fastify";
+import { Socket } from "socket.io";
 
 import { getLastMessage, getNewMessages } from "../../db/messages";
 import { hasConversationAccess } from "../../db/sessions";
 import { getConversation } from "../../db/conversations";
-import { DB_FETCH_INTERVAL, EVENTS, LiveServiceName } from "./constants";
+import { LiveServiceName, DB_FETCH_INTERVAL, EVENTS } from "../constants";
 import { ConversationDbListener } from "./types";
+import { ServiceBase } from "../service-base";
 
-/**
- * TODO reuse common methods to base class
- */
-export class LiveService {
-    server: FastifyInstance;
-
-    log: FastifyBaseLogger;
-
-    private _io?: Server;
-
-    get io (): Server {
-        if (!this._io) {
-            throw Error("Socket IO is not defined");
-        }
-        return this._io;
-    }
-
-    set io (value: Server) {
-        this._io = value;
-    }
+export class LiveService extends ServiceBase {
+    name = LiveServiceName;
 
     listeners: ConversationDbListener[];
 
     constructor ({ server }: { server: FastifyInstance }) {
-        this.server = server;
-        this.log = server.log;
+        super({ server });
         this.listeners = [];
-    }
-
-    connect () {
-        const connectedServer = this.server as FastifyInstance & {
-            io: Server;
-        };
-        if (!connectedServer.io) {
-            throw Error("[LiveService] Cannot connect Socket IO");
-        }
-        this._io = connectedServer.io;
-
-        this.io.on("connection", this.initSocket.bind(this));
 
         this.listenDb();
     }
 
     async initSocket (socket: Socket) {
-        if (!socket.handshake.auth.services?.includes(LiveServiceName)) {
-            return;
-        }
-
-        this.log.info(`[LiveService] Socket #${socket.id} ${socket.recovered ? "re-" : ""}connected`);
-
         this.listenConversation(socket);
 
         socket.on(EVENTS.STOP_LISTENING_CONVERSATION, () => this.stopListener(socket));
         socket.on("disconnect", () => {
-            this.log.info(`[LiveService] Socket #${socket.id} disconnected`);
             this.stopListener(socket);
         });
     }
@@ -71,16 +34,16 @@ export class LiveService {
             conversationId: string;
             session: string;
         }) => {
-            this.log.info(`[LiveService] Init room for conversation ${conversationId} by session ${session}`);
+            this.log.info(`Init room for conversation ${conversationId} by session ${session}`, socket.id);
 
             if (!conversationId || !session) {
-                this.closeSocket(socket, "[LiveService] Bad request!");
+                this.closeSocket(socket, "[Live Service] Bad request!");
                 return;
             }
 
             const conversation = await getConversation(conversationId);
             if (!conversation) {
-                this.closeSocket(socket, "[LiveService] Conversation Not Found!");
+                this.closeSocket(socket, "[Live Service] Conversation Not Found!");
                 return;
             }
 
@@ -95,6 +58,12 @@ export class LiveService {
             socket.data.conversationId = conversationId;
 
             await this.addListener(socket);
+
+            const listeningSocketsLength = this.listeners.reduce((memo, { sockets }) => memo + sockets.length, 0);
+            this.log.info(
+                `Listening ${this.listeners.length} conversations by ${listeningSocketsLength} sockets`,
+                socket.id,
+            );
         });
     }
 
@@ -104,7 +73,7 @@ export class LiveService {
             session,
         );
         if (!isSessionValid) {
-            this.closeSocket(socket, "[LiveService] Access Denied!");
+            this.closeSocket(socket, "[Live Service] Access Denied!");
             return false;
         }
         return true;
@@ -150,8 +119,7 @@ export class LiveService {
                 this.sendMessagesToClient(listener.conversationId, newMessages.map(({ id }) =>  id));
             }
         } catch (e) {
-            // TODO proper handling, send event to client
-            this.log.error(e);
+            this.log.error(`${e}`);
         }
     }
 
@@ -159,37 +127,32 @@ export class LiveService {
         const socketId = socket.id;
         const conversationId = socket.data.conversationId;
         if (!conversationId) {
-            this.log.error(`[LiveService] Cannot stop listening for socket ${socketId}, no conversation`);
+            this.log.info("No conversation while stop listener", socket.id);
             return;
         }
 
-        this.log.info(`[LiveService] Stop listening conversation ${conversationId}`);
+        this.log.info(`Stop listening conversation ${conversationId}`, socket.id);
 
         socket.leave(conversationId);
 
         const listenerIndex = this.listeners.findIndex((listener) => listener.conversationId === conversationId);
         if (listenerIndex < 0) {
-            this.log.error(`[LiveService] Listener ${socketId} for conversation ${conversationId} lost`);
+            this.log.error(`Listener ${socketId} for conversation ${conversationId} lost`, socket.id);
             return;
         }
 
         const listener = this.listeners[listenerIndex];
         const socketIndex = listener.sockets.indexOf(socketId);
         if (socketIndex > -1) {
-            listener.sockets.splice(socketIndex);
+            listener.sockets.splice(socketIndex, 1);
         }
         if (!listener.sockets.length) {
-            this.listeners.splice(listenerIndex);
+            this.listeners.splice(listenerIndex, 1);
         }
     }
 
     sendMessagesToClient (conversationId: string, messagesIds: string[]) {
-        this.log.info(`[LiveService] Sending messages to client ${conversationId}`);
+        this.log.info(`Sending conversation message Ids ${conversationId}`);
         this.io.to(conversationId).emit(EVENTS.NEW_MESSAGES, messagesIds);
-    }
-
-    closeSocket (socket: Socket, message?: string) {
-        if (message) socket.emit(EVENTS.ERROR, { message });
-        socket.disconnect(true);
     }
 }

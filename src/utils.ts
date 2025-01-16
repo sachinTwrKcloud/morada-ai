@@ -1,5 +1,18 @@
+import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { FastifyReply } from "fastify";
 import { MessageActors, MessageStatus, MessageType, ServerMessageDto } from "./types";
 import { MessageDbRow } from "./db/messages";
+
+export const delay = (time: number) => {
+    return new Promise((resolve) => setTimeout(resolve, time));
+};
+
+export const getPublicPageResponse = async (reply: FastifyReply, page: string) => {
+    const data = await readFile(join(process.cwd(), `public/${page}.html`));
+    reply.header("content-type", "text/html; charset=utf-8");
+    reply.send(data);
+};
 
 export const getStatusFromDbMessage = ({
     deliveredAt, readAt, metadata,

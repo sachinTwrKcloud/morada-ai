@@ -69,7 +69,7 @@
             }
         });
         socket.onAny((eventName, payload) => {
-            console.log("event name:",eventName,"payload:", payload);
+            console.log(eventName, payload);
         });
         socket.on(ERROR, ({ message }) => {
             alert(message);

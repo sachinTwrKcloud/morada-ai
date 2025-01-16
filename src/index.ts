@@ -1,12 +1,12 @@
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
 import Fastify from "fastify";
 import FastifySocketIo from "fastify-socket.io";
 import { ServerOptions } from "socket.io";
 import { receiveMessageSchema } from "./schema";
 import { MiaMessageDto, MiaRequestParams } from "./types";
+import { getPublicPageResponse } from "./utils";
+import { ChatServiceName } from "./services/constants";
+import { ServiceHandler } from "./services/service-handler";
 import { ChatService } from "./services/chat/chat-service";
-import { LiveService } from "./services/live/live-service";
 
 const server = Fastify({
     logger: !!process.env.SERVER_DEBUG && process.env.SERVER_DEBUG !== "false",
@@ -19,29 +19,25 @@ server.register(FastifySocketIo, {
 } as ServerOptions);
 
 server.get("/", { logLevel: "warn" }, async function handler (request, reply) {
-    const data = await readFile(join(process.cwd(), "public/index.html"));
-    reply.header("content-type", "text/html; charset=utf-8");
-    reply.send(data);
+    await getPublicPageResponse(reply, "index");
 });
-
+server.get("/chat", { logLevel: "warn" }, async function handler (request, reply) {
+    await getPublicPageResponse(reply, "chat");
+});
 server.get("/live", { logLevel: "warn" }, async function handler (request, reply) {
-    const data = await readFile(join(process.cwd(), "public/live.html"));
-    reply.header("content-type", "text/html; charset=utf-8");
-    reply.send(data);
+    await getPublicPageResponse(reply, "live");
 });
 
 server.get("/health-check", { logLevel: "warn" }, async function handler () {});
 server.get("/favicon.ico", { logLevel: "warn" }, async function handler () {});
 server.get("/mia-chat-api", { logLevel: "warn" }, async function handler () {}); // TODO check why lb call that
 
-const chatService = new ChatService({ server });
-const liveService = new LiveService({ server });
+const serviceHandler = new ServiceHandler({ server });
 
 server.ready(async (err) => {
     if (err) throw err;
 
-    chatService.connect();
-    liveService.connect();
+    serviceHandler.init();
 });
 
 server.listen({
@@ -59,6 +55,7 @@ server.post("/receive-message/:instanceId", { schema: receiveMessageSchema }, as
     const token = request.headers.token as string;
     const { instanceId } = request.params as MiaRequestParams;
 
+    const chatService = serviceHandler.getService<ChatService>(ChatServiceName);
     const instance = await chatService.getInstanceForSystemMessage(instanceId, token);
 
     const message = request.body as MiaMessageDto;
