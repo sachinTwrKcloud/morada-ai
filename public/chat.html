@@ -62,6 +62,7 @@
         #header-id {
             display: flex;
             gap: 20px;
+            flex-wrap: wrap;
             margin: 0;
             padding: 0.5rem 1rem;
             position: sticky;
@@ -76,12 +77,18 @@
 </head>
 <body>
 <div id="header-id">
+    <input id="room-id" name="room-id" placeholder="Room Id"/>
     <input id="chat-id" name="chat-id" placeholder="Chat Id"/>
     <input id="token-id" name="token-id" placeholder="Chat Token"/>
     <button id="connect-id" onclick="connect()">Connect</button>
 
     <div id="instance-name-id">&nbsp;</div>
     <div id="user-name-id"></div>
+
+    <div>
+        Test <input id="count-id" placeholder="Count" /> connections
+        <button id="connect-many-id" onclick="connectMany()">Connect</button>
+    </div>
 </div>
 <ul id="messages"></ul>
 <form id="form" action="">
@@ -122,17 +129,24 @@
     const EVENT_INIT_ROOM = "EVENT_INIT_ROOM";
     const EVENT_ERROR = "EVENT_ERROR";
 
-    let socket;
+    const sockets = [];
 
-    function connect() {
+    function connectMany() {
+        const count = +document.getElementById('count-id').value;
+        for (let index = 0; index < count; index++) {
+            connect(index);
+        }
+    }
+
+    function connect(index = 0) {
         document.getElementById('connect-id').setAttribute("disabled", "disabled");
+        document.getElementById('connect-many-id').setAttribute("disabled", "disabled");
 
         const instance = {
             token: document.getElementById('token-id').value,
             chatId: document.getElementById('chat-id').value,
         };
-        const urlParams = new URLSearchParams(window.location.search);
-        const roomId = urlParams.get('room') || localStorage.getItem("chat.roomId");
+        const roomId = document.getElementById('room-id').value || localStorage.getItem("chat.roomId");
 
         socket = io({
             auth: {
@@ -140,15 +154,21 @@
                 roomId,
             }
         });
+
+        sockets[index] = socket;
+
         socket.on(EVENT_INIT_ROOM, ({roomId, instance}) => {
             console.log(EVENT_INIT_ROOM, roomId);
 
             document.getElementById('instance-name-id').innerText = instance.name;
-
-            if (!urlParams.get('room')) {
-                localStorage.setItem("chat.roomId", roomId);
-            }
+            document.getElementById('room-id').value = roomId;
         });
+
+        socket.on(EVENT_ERROR, ({message}) => {
+            console.error(message);
+        });
+
+        if (index > 0) return;
 
         socket.on(EVENT_SERVER_INIT_MESSAGE_LIST, (messages) => {
             messagesElement.innerHTML = "";
@@ -181,11 +201,6 @@
                     stateElement.remove();
                 }, 2000);
             }
-        });
-
-        socket.on(EVENT_ERROR, ({message}) => {
-            alert(message);
-            console.error(message);
         });
     }
 

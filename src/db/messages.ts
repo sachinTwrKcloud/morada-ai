@@ -52,23 +52,3 @@ export async function getRoomMessages (roomId: string, botId: string) {
         ORDER BY created_at
     `;
 }
-
-export async function getNewMessages (conversationId: string, lastMessageId?: string) {
-    const messageId = lastMessageId || (await  getLastMessage(conversationId))?.id;
-
-    return sql<MessageDbRow[]>`
-        SELECT * FROM messages
-        WHERE conversation_id::text = ${conversationId}
-            AND created_at > (SELECT created_at FROM messages WHERE id::text = ${messageId})
-        ORDER BY created_at DESC
-    `;
-}
-
-export async function getLastMessage (conversationId: string) {
-    return (await sql<{ id: string }[]>`
-        SELECT * FROM messages
-        WHERE conversation_id::text = ${conversationId}
-        ORDER BY created_at DESC 
-        LIMIT 1
-    `)[0];
-}

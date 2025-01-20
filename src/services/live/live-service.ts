@@ -1,12 +1,12 @@
 import { FastifyInstance } from "fastify";
 import { Socket } from "socket.io";
 
-import { getLastMessage, getNewMessages } from "../../db/messages";
 import { hasConversationAccess } from "../../db/sessions";
 import { getConversation } from "../../db/conversations";
-import { LiveServiceName, DB_FETCH_INTERVAL, EVENTS } from "../constants";
+import { LiveServiceName, EVENTS } from "../constants";
 import { ConversationDbListener } from "./types";
 import { ServiceBase } from "../service-base";
+import sql from "../../db/db";
 
 export class LiveService extends ServiceBase {
     name = LiveServiceName;
@@ -92,7 +92,6 @@ export class LiveService extends ServiceBase {
             this.listeners.push(listener);
         }
 
-        listener.lastMessageId = (await getLastMessage(conversationId))?.id;
         if (!listener.sockets.includes(socketId)) {
             listener.sockets.push(socketId);
         }
@@ -100,27 +99,16 @@ export class LiveService extends ServiceBase {
         return listener;
     }
 
-    listenDb () {
-        // TODO use postgres PUBLICATION (listeners/notifications)
-        setInterval(async () => {
+    async listenDb () {
+        await sql.listen("messages_insert_event", (payload) => {
+            const message = JSON.parse(payload);
+
             for (const listener of this.listeners) {
-                if (listener.sockets.length) {
-                    await this.syncNewMessages(listener);
+                if (listener.sockets.length && listener.conversationId === message.conversation_id) {
+                    this.sendMessagesToClient(listener.conversationId, [message.id]);
                 }
             }
-        }, DB_FETCH_INTERVAL);
-    }
-
-    async syncNewMessages (listener: ConversationDbListener) {
-        try {
-            const newMessages = await getNewMessages(listener.conversationId, listener.lastMessageId);
-            if (newMessages.length > 0) {
-                listener.lastMessageId = newMessages[0].id;
-                this.sendMessagesToClient(listener.conversationId, newMessages.map(({ id }) =>  id));
-            }
-        } catch (e) {
-            this.log.error(`${e}`);
-        }
+        });
     }
 
     stopListener (socket: Socket) {

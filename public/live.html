@@ -20,6 +20,7 @@
 
         #header-id {
             display: flex;
+            flex-wrap: wrap;
             gap: 20px;
             margin: 0;
             padding: 0.5rem 1rem;
@@ -31,12 +32,17 @@
 </head>
 <body>
 <div id="header-id">
-    <button onclick="connect()">Connect</button>
+    <button id="connect-id" onclick="connect()">Connect</button>
     <button onclick="disconnect()">Disconnect</button>
     <input id="session-id" placeholder="Session" />
     <input id="conversation-id" placeholder="Conversation" />
-    <button onclick="listen()">Listen</button>
+    <button id="listen-id" onclick="listen()">Listen</button>
     <button onclick="stop()">Stop</button>
+
+    <div style="width:100%">
+        Test <input id="count-id" placeholder="Count" /> connections
+        <button id="connect-many-id" onclick="connectMany()">Connect</button>
+    </div>
 </div>
 <ul id="messages"></ul>
 
@@ -58,40 +64,54 @@
     const NEW_MESSAGES = "NEW_MESSAGES";
     const LISTEN_CONVERSATION = "LISTEN_CONVERSATION";
     const STOP_LISTENING_CONVERSATION = "STOP_LISTENING_CONVERSATION";
-    const ERROR = "ERROR";
+    const ERROR = "EVENT_ERROR";
 
-    let socket;
+    const sockets = [];
 
-    function connect() {
-        socket = io({
+    function connectMany() {
+        const count = +document.getElementById('count-id').value;
+        for (let index = 0; index < count; index++) {
+            connect(index);
+            listen(index)
+        }
+    }
+
+    function connect(index = 0) {
+        document.getElementById('connect-id').setAttribute("disabled", "disabled");
+        document.getElementById('connect-many-id').setAttribute("disabled", "disabled");
+
+        sockets[index] = io({
             auth: {
                 services: ["live"],
             }
         });
-        socket.onAny((eventName, payload) => {
+
+        sockets[index].onAny((eventName, payload) => {
             console.log(eventName, payload);
         });
-        socket.on(ERROR, ({ message }) => {
-            alert(message);
+        sockets[index].on(ERROR, ({ message }) => {
+            console.error(message);
         });
     }
 
-    function disconnect() {
-        socket.disconnect();
+    function disconnect(index = 0) {
+        document.getElementById('connect-id').removeAttribute("disabled");
+        sockets[index].disconnect();
     }
 
-    function listen() {
-        const conversationId = document.getElementById("conversation-id").value;
+    function listen(index = 0, conversationMock) {
+        document.getElementById('listen-id').setAttribute("disabled", "disabled");
+        const conversationId = conversationMock || document.getElementById("conversation-id").value;
         const session = document.getElementById("session-id").value;
 
-        socket?.on(NEW_MESSAGES, createMessageElements);
-        socket?.emit(LISTEN_CONVERSATION, { conversationId, session: session });
+        sockets[index]?.on(NEW_MESSAGES, createMessageElements);
+        sockets[index]?.emit(LISTEN_CONVERSATION, { conversationId, session: session });
     }
 
-    function stop() {
+    function stop(index = 0) {
         const conversationId = document.getElementById("conversation-id").value;
-        socket?.off(NEW_MESSAGES, createMessageElements);
-        socket?.emit(STOP_LISTENING_CONVERSATION, conversationId);
+        sockets[index]?.off(NEW_MESSAGES, createMessageElements);
+        sockets[index]?.emit(STOP_LISTENING_CONVERSATION, conversationId);
     }
 </script>
 
