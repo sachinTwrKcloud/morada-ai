@@ -65,4 +65,26 @@ ALTER TABLE bots ADD COLUMN partner_id INT;
 ALTER TABLE conversations
 ADD COLUMN bot_id INT REFERENCES bots(id);
 
+-- Add missing columns to messages table
+ALTER TABLE messages 
+ADD COLUMN conversation_id INT REFERENCES conversations(id),
+ADD COLUMN actor VARCHAR(50),
+ADD COLUMN metadata JSONB;
+
+-- Create people table
+CREATE TABLE IF NOT EXISTS people (
+    id SERIAL PRIMARY KEY,
+    props JSONB,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add missing columns to conversations table
+ALTER TABLE conversations 
+ADD COLUMN person_id INT REFERENCES people(id),
+ADD COLUMN finished_at TIMESTAMPTZ;
+
+ALTER TABLE conversations 
+ADD COLUMN props JSONB DEFAULT '{}'::jsonb;
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
